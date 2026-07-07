@@ -50,7 +50,7 @@ export function demoReviewGeneration(
 }
 
 export function demoRegenerateSection(
-  fullContent: string,
+  _fullContent: string,
   selectedText: string,
   profile: SavedProfile,
 ): string {

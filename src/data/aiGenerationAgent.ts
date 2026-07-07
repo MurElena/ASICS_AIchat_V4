@@ -10,7 +10,6 @@ import {
 import {
   type AiGenerationDraft,
   type WorkflowFieldId,
-  createEmptyDraft,
   getActiveField,
   isDraftReadyForConfirmation,
   isFieldComplete,

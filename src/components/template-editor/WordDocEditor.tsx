@@ -16,7 +16,7 @@ export function WordDocEditor({
   html,
   contentType,
   onHtmlChange,
-  onContentTypeChange,
+  onContentTypeChange: _onContentTypeChange,
   onSelectionChange,
 }: WordDocEditorProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -104,7 +104,6 @@ export function WordDocEditor({
 export function wordHtmlToCells(html: string) {
   const div = document.createElement("div");
   div.innerHTML = html;
-  const blocks = div.querySelectorAll(".word-prompt-block p, .word-doc-body > p, p");
   const cells: { row: number; col: number; value: string; contentType: "text" | "prompt"; html: string }[] = [];
   let row = 0;
   div.querySelectorAll(".word-prompt-block, .word-doc-body > p, .word-doc-body > div, p").forEach((el) => {

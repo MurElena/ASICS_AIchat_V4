@@ -49,7 +49,7 @@ export function applyTemplateUpdates(
 export function localTemplateEditFallback(
   kind: TemplateEditorKind,
   message: string,
-  cells: TemplateCell[],
+  _cells: TemplateCell[],
   selected?: { row: number; col: number },
 ): { reply: string; updates?: TemplateCellUpdate[]; wordHtml?: string } {
   const refs = [...message.matchAll(CELL_REF)].map((m) => colRowFromRef(m[1])).filter(Boolean) as {

@@ -1,6 +1,7 @@
+import { Document, Packer, Paragraph, TextRun } from "docx";
+import * as XLSX from "xlsx";
 import type { TemplateEditorKind } from "../data/templatesLibrary";
 import {
-  cellKey,
   decodeCellValue,
   encodeCellValue,
   type TemplateCell,
@@ -10,35 +11,12 @@ import { saveTemplateFile, loadTemplateFile, type StoredTemplateFile } from "./t
 export const EXCEL_GRID_ROWS = 8;
 export const EXCEL_GRID_COLS = 6;
 
-type XlsxModule = typeof import("xlsx");
-
-let xlsxPromise: Promise<XlsxModule> | null = null;
-
-async function loadXlsx(): Promise<XlsxModule> {
-  if (!xlsxPromise) {
-    xlsxPromise = import(/* @vite-ignore */ "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
-  }
-  return xlsxPromise;
-}
-
-type DocxModule = typeof import("docx");
-
-let docxPromise: Promise<DocxModule> | null = null;
-
-async function loadDocx(): Promise<DocxModule> {
-  if (!docxPromise) {
-    docxPromise = import(/* @vite-ignore */ "https://esm.sh/docx@8.5.0");
-  }
-  return docxPromise;
-}
-
 export function templateFileName(kind: TemplateEditorKind, baseName: string): string {
   const safe = baseName.trim().replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").toLowerCase() || "template";
   return kind === "excel" ? `${safe}.xlsx` : `${safe}.docx`;
 }
 
 export async function createBlankExcelBlob(): Promise<Blob> {
-  const XLSX = await loadXlsx();
   const sheet = XLSX.utils.aoa_to_sheet(
     Array.from({ length: EXCEL_GRID_ROWS }, () => Array.from({ length: EXCEL_GRID_COLS }, () => "")),
   );
@@ -51,7 +29,6 @@ export async function createBlankExcelBlob(): Promise<Blob> {
 }
 
 export async function createBlankWordBlob(): Promise<Blob> {
-  const { Document, Packer, Paragraph, TextRun } = await loadDocx();
   const doc = new Document({
     sections: [{ children: [new Paragraph({ children: [new TextRun("")] })] }],
   });
@@ -63,7 +40,6 @@ export async function createBlankTemplateBlob(kind: TemplateEditorKind): Promise
 }
 
 export async function parseExcelCells(blob: Blob): Promise<TemplateCell[]> {
-  const XLSX = await loadXlsx();
   const buffer = await blob.arrayBuffer();
   const wb = XLSX.read(buffer, { type: "array" });
   const sheet = wb.Sheets[wb.SheetNames[0]];
@@ -93,7 +69,6 @@ export async function parseWordCells(_blob: Blob): Promise<TemplateCell[]> {
 }
 
 export async function cellsToExcelBlob(cells: TemplateCell[], baseBlob?: Blob): Promise<Blob> {
-  const XLSX = await loadXlsx();
   let wb;
   if (baseBlob) {
     wb = XLSX.read(await baseBlob.arrayBuffer(), { type: "array" });
@@ -139,10 +114,8 @@ export async function cellsToExcelBlob(cells: TemplateCell[], baseBlob?: Blob): 
 }
 
 export async function cellsToWordBlob(cells: TemplateCell[], wordHtml?: string): Promise<Blob> {
-  const docx = await loadDocx();
-  const { Document, Packer, Paragraph, TextRun } = docx;
+  let children: Paragraph[] = [];
 
-  let children;
   if (wordHtml?.trim()) {
     const div = typeof document !== "undefined" ? document.createElement("div") : null;
     if (div) {
@@ -157,7 +130,7 @@ export async function cellsToWordBlob(cells: TemplateCell[], wordHtml?: string):
     }
   }
 
-  if (!children?.length) {
+  if (children.length === 0) {
     const sorted = [...cells].sort((a, b) => a.row - b.row);
     children =
       sorted.length > 0
