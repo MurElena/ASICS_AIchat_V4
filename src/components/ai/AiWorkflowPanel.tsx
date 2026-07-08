@@ -2,60 +2,104 @@ import type { CSSProperties, ReactNode } from "react";
 import {
   type AiGenerationDraft,
   type WorkflowFieldId,
+  WORKFLOW_FIELDS,
   getCompletedWorkflowFields,
   getFieldDisplayValue,
+  isFieldComplete,
 } from "../../data/aiGenerationWorkflow";
 import { WorkflowInputValue } from "./WorkflowInputValue";
 
 interface AiWorkflowPanelProps {
   draft: AiGenerationDraft;
+  activeFieldId: WorkflowFieldId;
+  onStepClick: (fieldId: WorkflowFieldId) => void;
 }
 
-export function AiWorkflowPanel({ draft }: AiWorkflowPanelProps) {
+export function AiWorkflowPanel({ draft, activeFieldId, onStepClick }: AiWorkflowPanelProps) {
   const completedFields = getCompletedWorkflowFields(draft);
+  const visibleIds = new Set(completedFields.map((f) => f.id));
+
+  if (draft.awaitingProfileConfirmation || draft.awaitingStepSelection) {
+    WORKFLOW_FIELDS.forEach((f) => {
+      if (f.id !== "confirm" && isFieldComplete(draft, f.id)) {
+        visibleIds.add(f.id);
+      }
+    });
+  }
+
+  const visibleFields = WORKFLOW_FIELDS.filter((f) => visibleIds.has(f.id));
 
   return (
-    <aside className="ai-workflow-tree" aria-label="Generation workflow">
+    <aside
+      className={`ai-workflow-tree${draft.awaitingStepSelection ? " ai-workflow-tree--pick-step" : ""}`}
+      aria-label="Generation workflow"
+    >
       <div className="ai-workflow-tree-root">
         <WorkflowIcon id="agent" color="#3b82f6" />
         <span className="ai-workflow-tree-root-label">Agent</span>
       </div>
 
-      {completedFields.length > 0 && (
+      {visibleFields.length > 0 && (
         <ol className="ai-workflow-tree-branch">
-          {completedFields.map((field, index) => {
+          {visibleFields.map((field, index) => {
             const value = getFieldDisplayValue(draft, field.id);
-            const isLast = index === completedFields.length - 1;
+            const isLast = index === visibleFields.length - 1;
+            const isActive = field.id === activeFieldId || draft.editingFieldId === field.id;
+            const isClickable = field.id !== "confirm";
+            const pickStep = draft.awaitingStepSelection && isClickable;
 
             return (
               <li
                 key={field.id}
-                className="ai-workflow-tree-node"
+                className={`ai-workflow-tree-node${isActive ? " ai-workflow-tree-node--active" : ""}${pickStep ? " ai-workflow-tree-node--pickable" : ""}`}
                 style={{ "--step-color": field.color } as CSSProperties}
               >
                 <div className="ai-workflow-tree-rail" aria-hidden>
                   <span className="ai-workflow-tree-rail-elbow" />
                   {!isLast && <span className="ai-workflow-tree-rail-line" />}
                 </div>
-                <div className="ai-workflow-tree-node-content">
-                  <WorkflowIcon id={field.id} color={field.color} />
-                  <div className="ai-workflow-tree-node-text">
-                    <span className="ai-workflow-tree-node-label">{field.label}</span>
-                    <span className="ai-workflow-tree-node-value">
-                      {field.id === "input" ? (
-                        <WorkflowInputValue draft={draft} />
-                      ) : (
-                        value
-                      )}
-                    </span>
+                {isClickable ? (
+                  <button
+                    type="button"
+                    className="ai-workflow-tree-node-btn"
+                    onClick={() => onStepClick(field.id)}
+                    aria-current={isActive ? "step" : undefined}
+                  >
+                    <WorkflowNodeContent draft={draft} field={field} value={value} />
+                  </button>
+                ) : (
+                  <div className="ai-workflow-tree-node-content">
+                    <WorkflowNodeContent draft={draft} field={field} value={value} />
                   </div>
-                </div>
+                )}
               </li>
             );
           })}
         </ol>
       )}
     </aside>
+  );
+}
+
+function WorkflowNodeContent({
+  draft,
+  field,
+  value,
+}: {
+  draft: AiGenerationDraft;
+  field: { id: WorkflowFieldId; label: string; color: string };
+  value: string;
+}) {
+  return (
+    <>
+      <WorkflowIcon id={field.id} color={field.color} />
+      <div className="ai-workflow-tree-node-text">
+        <span className="ai-workflow-tree-node-label">{field.label}</span>
+        <span className="ai-workflow-tree-node-value">
+          {field.id === "input" ? <WorkflowInputValue draft={draft} /> : value}
+        </span>
+      </div>
+    </>
   );
 }
 

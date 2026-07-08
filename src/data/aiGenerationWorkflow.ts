@@ -1,4 +1,4 @@
-import type { ProfileType } from "./profiles";
+import type { ProfileType, SavedProfile } from "./profiles";
 import type { User } from "./session";
 import {
   OUTPUT_LENGTHS,
@@ -31,12 +31,6 @@ export const WORKFLOW_FIELDS: WorkflowFieldConfig[] = [
     label: "Generation type",
     color: "#8b5cf6",
     description: "Single output file or multiproduct batch",
-  },
-  {
-    id: "input",
-    label: "Input",
-    color: "#6366f1",
-    description: "Source documents or pasted text for generation",
   },
   {
     id: "template",
@@ -72,7 +66,13 @@ export const WORKFLOW_FIELDS: WorkflowFieldConfig[] = [
     id: "referenceContent",
     label: "Reference content",
     color: "#3b82f6",
-    description: "Upload-only reference materials",
+    description: "Brand Voice library reference documents",
+  },
+  {
+    id: "input",
+    label: "Context input",
+    color: "#6366f1",
+    description: "Source files or pasted text for generation context",
   },
   {
     id: "confirm",
@@ -96,12 +96,24 @@ export interface AiGenerationDraft {
   glossaryNames: string[];
   glossariesSkipped: boolean;
   styleGuideMode: "existing" | "custom" | "none" | null;
-  styleGuideName: string | null;
+  styleGuideNames: string[];
   styleGuideCustomInstructions: string;
   styleGuideSkipped: boolean;
-  referenceFiles: File[];
-  referenceSkipped: boolean;
+  referenceContentNames: string[];
+  referenceContentSkipped: boolean;
   awaitingConfirmation: boolean;
+  /** User chose to change settings — pick a workflow step in the panel. */
+  awaitingStepSelection: boolean;
+  /** Prefilled from a saved profile — user must confirm settings before input. */
+  awaitingProfileConfirmation: boolean;
+  matchedProfileId: string | null;
+  matchedProfileName: string | null;
+  /** User clicked a workflow step to revise it. */
+  editingFieldId: WorkflowFieldId | null;
+  /** After generation: ask to save profile. */
+  saveProfilePhase: null | "ask" | "name";
+  /** Naming a profile before generation (Save and generate). */
+  saveProfileBeforeGeneration: boolean;
 }
 
 export function getCompletedWorkflowFields(draft: AiGenerationDraft): WorkflowFieldConfig[] {
@@ -125,12 +137,19 @@ export function createEmptyDraft(): AiGenerationDraft {
     glossaryNames: [],
     glossariesSkipped: false,
     styleGuideMode: null,
-    styleGuideName: null,
+    styleGuideNames: [],
     styleGuideCustomInstructions: "",
     styleGuideSkipped: false,
-    referenceFiles: [],
-    referenceSkipped: false,
+    referenceContentNames: [],
+    referenceContentSkipped: false,
     awaitingConfirmation: false,
+    awaitingStepSelection: false,
+    awaitingProfileConfirmation: false,
+    matchedProfileId: null,
+    matchedProfileName: null,
+    editingFieldId: null,
+    saveProfilePhase: null,
+    saveProfileBeforeGeneration: false,
   };
 }
 
@@ -156,11 +175,11 @@ export function isFieldComplete(draft: AiGenerationDraft, fieldId: WorkflowField
       return draft.glossariesSkipped || draft.glossaryNames.length > 0;
     case "styleGuide":
       if (draft.styleGuideSkipped || draft.styleGuideMode === "none") return true;
-      if (draft.styleGuideMode === "existing") return draft.styleGuideName !== null;
+      if (draft.styleGuideMode === "existing") return draft.styleGuideNames.length > 0;
       if (draft.styleGuideMode === "custom") return draft.styleGuideCustomInstructions.trim().length > 0;
       return false;
     case "referenceContent":
-      return draft.referenceSkipped || draft.referenceFiles.length > 0;
+      return draft.referenceContentSkipped || draft.referenceContentNames.length > 0;
     case "confirm":
       return draft.awaitingConfirmation;
     default:
@@ -169,12 +188,90 @@ export function isFieldComplete(draft: AiGenerationDraft, fieldId: WorkflowField
 }
 
 export function getActiveField(draft: AiGenerationDraft): WorkflowFieldId {
-  if (draft.awaitingConfirmation) return "confirm";
+  if (draft.editingFieldId) return draft.editingFieldId;
+  if (draft.awaitingConfirmation || draft.awaitingStepSelection) return "confirm";
   for (const field of WORKFLOW_FIELDS) {
     if (field.id === "confirm") continue;
     if (!isFieldComplete(draft, field.id)) return field.id;
   }
   return "confirm";
+}
+
+export function draftFromSavedProfile(profile: SavedProfile): AiGenerationDraft {
+  const glossaryNames =
+    profile.dictionary && profile.dictionary !== "No dictionary"
+      ? profile.dictionary.split(",").map((part) => part.trim()).filter(Boolean)
+      : [];
+
+  return {
+    ...createEmptyDraft(),
+    generationType: profile.type,
+    template: profile.template,
+    language: profile.language,
+    maxLength: profile.type === "multiproduct" ? null : profile.length,
+    glossaryNames,
+    glossariesSkipped: glossaryNames.length === 0,
+    styleGuideMode: profile.styleGuides.length > 0 ? "existing" : "none",
+    styleGuideNames: [...profile.styleGuides],
+    styleGuideSkipped: profile.styleGuides.length === 0,
+    referenceContentNames: [...profile.referenceContent],
+    referenceContentSkipped: profile.referenceContent.length === 0,
+    matchedProfileId: profile.id,
+    matchedProfileName: profile.name,
+    awaitingProfileConfirmation: true,
+  };
+}
+
+export function clearFieldValue(draft: AiGenerationDraft, fieldId: WorkflowFieldId): AiGenerationDraft {
+  const next = {
+    ...draft,
+    awaitingConfirmation: false,
+    awaitingProfileConfirmation: false,
+    awaitingStepSelection: false,
+  };
+
+  switch (fieldId) {
+    case "input":
+      return {
+        ...next,
+        inputFiles: [],
+        userTypedInput: "",
+        inputFileExtracts: {},
+      };
+    case "generationType":
+      return { ...next, generationType: null };
+    case "template":
+      return {
+        ...next,
+        template: null,
+        templateCreationPhase: null,
+        templateLlmDescription: "",
+      };
+    case "language":
+      return { ...next, language: null };
+    case "maxLength":
+      return { ...next, maxLength: null };
+    case "glossaries":
+      return { ...next, glossaryNames: [], glossariesSkipped: false };
+    case "styleGuide":
+      return {
+        ...next,
+        styleGuideMode: null,
+        styleGuideNames: [],
+        styleGuideCustomInstructions: "",
+        styleGuideSkipped: false,
+      };
+    case "referenceContent":
+      return { ...next, referenceContentNames: [], referenceContentSkipped: false };
+    default:
+      return next;
+  }
+}
+
+export function isSettingsComplete(draft: AiGenerationDraft): boolean {
+  return WORKFLOW_FIELDS.filter((f) => f.id !== "confirm" && f.id !== "input").every((f) =>
+    isFieldComplete(draft, f.id),
+  );
 }
 
 export function isDraftReadyForConfirmation(draft: AiGenerationDraft): boolean {
@@ -209,16 +306,18 @@ export function getFieldDisplayValue(draft: AiGenerationDraft, fieldId: Workflow
       return draft.glossaryNames.length > 0 ? draft.glossaryNames.join(", ") : "Not set";
     case "styleGuide":
       if (draft.styleGuideSkipped || draft.styleGuideMode === "none") return "None";
-      if (draft.styleGuideMode === "existing") return draft.styleGuideName ?? "Not set";
+      if (draft.styleGuideMode === "existing") {
+        return draft.styleGuideNames.length > 0 ? draft.styleGuideNames.join(", ") : "Not set";
+      }
       if (draft.styleGuideMode === "custom") {
         const snippet = draft.styleGuideCustomInstructions.trim().slice(0, 40);
         return snippet ? `Custom: ${snippet}${draft.styleGuideCustomInstructions.length > 40 ? "…" : ""}` : "Not set";
       }
       return "Not set";
     case "referenceContent":
-      if (draft.referenceSkipped) return "None uploaded";
-      return draft.referenceFiles.length > 0
-        ? draft.referenceFiles.map((f) => f.name).join(", ")
+      if (draft.referenceContentSkipped) return "None";
+      return draft.referenceContentNames.length > 0
+        ? draft.referenceContentNames.join(", ")
         : "Not set";
     case "confirm":
       return draft.awaitingConfirmation ? "Ready to start" : "Pending";
@@ -227,23 +326,30 @@ export function getFieldDisplayValue(draft: AiGenerationDraft, fieldId: Workflow
   }
 }
 
-export function draftToSavedProfile(draft: AiGenerationDraft, user: User) {
+export function draftToSavedProfile(
+  draft: AiGenerationDraft,
+  user: User,
+  profileName?: string,
+): SavedProfile {
   const now = new Date();
   const styleGuides =
-    draft.styleGuideMode === "existing" && draft.styleGuideName
-      ? [draft.styleGuideName]
+    draft.styleGuideMode === "existing" && draft.styleGuideNames.length > 0
+      ? draft.styleGuideNames
       : draft.styleGuideMode === "custom"
         ? [`${user.name} — custom instructions`]
         : [];
 
   return {
-    id: `ai-run-${Date.now()}`,
-    name: `AI Generation · ${new Intl.DateTimeFormat("en", {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(now)}`,
+    id: `profile-${Date.now()}`,
+    name:
+      profileName?.trim() ||
+      draft.matchedProfileName ||
+      `AI Generation · ${new Intl.DateTimeFormat("en", {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(now)}`,
     type: draft.generationType ?? "single",
     createdBy: user.name,
     createdAt: new Intl.DateTimeFormat("en", { month: "short", year: "numeric" }).format(now),
@@ -253,9 +359,7 @@ export function draftToSavedProfile(draft: AiGenerationDraft, user: User) {
     dictionary:
       draft.glossaryNames.length > 0 ? draft.glossaryNames.join(", ") : "No dictionary",
     styleGuides,
-    referenceContent: draft.referenceSkipped
-      ? []
-      : draft.referenceFiles.map((f) => f.name),
+    referenceContent: draft.referenceContentSkipped ? [] : draft.referenceContentNames,
   };
 }
 
@@ -280,4 +384,60 @@ export function buildGenerationSource(draft: AiGenerationDraft): string {
   }
 
   return parts.join("\n\n").trim();
+}
+
+export const MULTI_SELECT_WORKFLOW_FIELDS: WorkflowFieldId[] = ["styleGuide", "referenceContent"];
+
+export function isMultiSelectField(fieldId: WorkflowFieldId): boolean {
+  return MULTI_SELECT_WORKFLOW_FIELDS.includes(fieldId);
+}
+
+export function getSelectedValuesForField(draft: AiGenerationDraft, fieldId: WorkflowFieldId): string[] {
+  if (fieldId === "styleGuide") return draft.styleGuideNames;
+  if (fieldId === "referenceContent") return draft.referenceContentNames;
+  return [];
+}
+
+export function toggleMultiSelectValue(
+  draft: AiGenerationDraft,
+  fieldId: WorkflowFieldId,
+  value: string,
+): AiGenerationDraft {
+  if (fieldId === "styleGuide") {
+    if (value === "none") {
+      return {
+        ...draft,
+        styleGuideSkipped: true,
+        styleGuideMode: "none",
+        styleGuideNames: [],
+        styleGuideCustomInstructions: "",
+      };
+    }
+    const set = new Set(draft.styleGuideNames);
+    if (set.has(value)) set.delete(value);
+    else set.add(value);
+    return {
+      ...draft,
+      styleGuideSkipped: false,
+      styleGuideMode: "existing",
+      styleGuideNames: [...set],
+      styleGuideCustomInstructions: "",
+    };
+  }
+
+  if (fieldId === "referenceContent") {
+    if (value === "none") {
+      return { ...draft, referenceContentSkipped: true, referenceContentNames: [] };
+    }
+    const set = new Set(draft.referenceContentNames);
+    if (set.has(value)) set.delete(value);
+    else set.add(value);
+    return {
+      ...draft,
+      referenceContentSkipped: false,
+      referenceContentNames: [...set],
+    };
+  }
+
+  return draft;
 }

@@ -3,6 +3,7 @@ import type { User } from "../data/session";
 import { IconPaperclip, IconSend } from "./Icons";
 import { AiWorkflowPanel } from "./ai/AiWorkflowPanel";
 import { AiConfirmationSummary } from "./ai/AiConfirmationSummary";
+import { AiChoiceButtons } from "./ai/AiChoiceButtons";
 import { AiSneakersAnimation } from "./ai/AiSneakersAnimation";
 import {
   GenerationEditor,
@@ -11,11 +12,15 @@ import {
 import { GenerationCommitModal } from "./GenerationCommitModal";
 import {
   type AiGenerationDraft,
+  type WorkflowFieldId,
   buildGenerationSource,
   createEmptyDraft,
   draftToSavedProfile,
   getActiveField,
+  getSelectedValuesForField,
+  isMultiSelectField,
 } from "../data/aiGenerationWorkflow";
+import { loadProfiles, saveProfiles } from "../data/profiles";
 import { buildGenerationOutput, type GenerationOutput } from "../data/generationOutput";
 import type { SavedProfile } from "../data/profiles";
 import {
@@ -29,6 +34,9 @@ import {
   processAgentTurn,
   shouldStartGeneration,
   getWorkflowPrompt,
+  beginFieldEdit,
+  startSaveProfilePrompt,
+  toggleDraftSelection,
   type ChatMessage,
 } from "../data/aiGenerationAgent";
 import { ACCEPTED_FILE_TYPES } from "../data/wizardConfig";
@@ -62,7 +70,9 @@ export function AiGenerationChat({ user, chatKey }: AiGenerationChatProps) {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const lastGenerationDraftRef = useRef<AiGenerationDraft | null>(null);
   const greeting = getTimeGreeting(user.name);
+  const activeField = getActiveField(draft);
   const attachProminent = isAttachProminent(draft, chatStarted);
 
   useEffect(() => {
@@ -97,24 +107,46 @@ export function AiGenerationChat({ user, chatKey }: AiGenerationChatProps) {
     if (!chatStarted) setChatStarted(true);
   };
 
-  const runAgentTurn = (
-    text: string,
-    files: File[],
+  const resetChat = () => {
+    setChatStarted(false);
+    setDraft(createEmptyDraft());
+    setMessages([]);
+    setInput("");
+    lastGenerationDraftRef.current = null;
+  };
+
+  const applyAgentResult = (
+    result: ReturnType<typeof processAgentTurn>,
     isFirstTurn: boolean,
-    draftOverride?: AiGenerationDraft,
   ) => {
-    const baseDraft = draftOverride ?? draft;
-
-    if (shouldStartGeneration(baseDraft, text)) {
-      startGeneration(baseDraft);
-      return;
-    }
-
-    const result = processAgentTurn(baseDraft, text, files);
     setDraft(result.draft);
 
     if (result.openTemplateWizard) {
       setShowTemplateWizard(true);
+    }
+
+    if (result.startGeneration) {
+      if (result.saveProfileName) {
+        const profile = draftToSavedProfile(result.draft, user, result.saveProfileName);
+        saveProfiles([profile, ...loadProfiles()]);
+      }
+      appendAssistantMessages(result.messagesToAppend);
+      startGeneration(result.draft);
+      return;
+    }
+
+    if (result.saveProfileName) {
+      const profile = draftToSavedProfile(result.draft, user, result.saveProfileName);
+      saveProfiles([profile, ...loadProfiles()]);
+      appendAssistantMessages(result.messagesToAppend);
+      resetChat();
+      return;
+    }
+
+    if (result.closeChat) {
+      appendAssistantMessages(result.messagesToAppend);
+      resetChat();
+      return;
     }
 
     if (result.messagesToAppend.length > 0) {
@@ -130,6 +162,55 @@ export function AiGenerationChat({ user, chatKey }: AiGenerationChatProps) {
         { id: `a-${Date.now()}`, role: "assistant", text: `${hello}${result.reply}` },
       ]);
     }
+  };
+
+  const runAgentTurn = (
+    text: string,
+    files: File[],
+    isFirstTurn: boolean,
+    draftOverride?: AiGenerationDraft,
+  ) => {
+    const baseDraft = draftOverride ?? draft;
+
+    if (shouldStartGeneration(baseDraft, text)) {
+      startGeneration(baseDraft);
+      return;
+    }
+
+    const result = processAgentTurn(baseDraft, text, files, {
+      isFirstTurn,
+      profiles: loadProfiles(),
+    });
+    applyAgentResult(result, isFirstTurn);
+  };
+
+  const submitChoice = (value: string, label: string) => {
+    if (busy || phase !== "intake") return;
+
+    const field = draft.editingFieldId ?? getActiveField(draft);
+    const isToggle =
+      isMultiSelectField(field) && value !== "none" && value !== "done selecting";
+
+    if (isToggle) {
+      appendUserMessage(label);
+      setDraft((current) => toggleDraftSelection(current, field, value));
+      return;
+    }
+
+    setBusy(true);
+    appendUserMessage(label);
+    runAgentTurn(value, [], false);
+    setBusy(false);
+  };
+
+  const handleStepClick = (fieldId: WorkflowFieldId) => {
+    if (busy || phase !== "intake" || fieldId === "confirm") return;
+    const baseDraft = draft.awaitingStepSelection
+      ? { ...draft, awaitingStepSelection: false }
+      : draft;
+    const result = beginFieldEdit(baseDraft, fieldId);
+    setDraft(result.draft);
+    appendAssistantMessages(result.messagesToAppend);
   };
 
   const enrichDraftWithFiles = async (
@@ -155,6 +236,7 @@ export function AiGenerationChat({ user, chatKey }: AiGenerationChatProps) {
   };
 
   const startGeneration = (finalDraft: AiGenerationDraft) => {
+    lastGenerationDraftRef.current = finalDraft;
     const profile = draftToSavedProfile(finalDraft, user);
     setRunningProfile(profile);
 
@@ -243,7 +325,7 @@ export function AiGenerationChat({ user, chatKey }: AiGenerationChatProps) {
     setBusy(false);
 
     const active = getActiveField(enriched);
-    const applyFiles = active === "input" || active === "referenceContent";
+    const applyFiles = active === "input";
 
     if (!applyFiles) {
       appendAssistantMessages([
@@ -273,9 +355,17 @@ export function AiGenerationChat({ user, chatKey }: AiGenerationChatProps) {
     setPendingEditorClose(null);
     setShowCommitModal(false);
     setPhase("intake");
-    setChatStarted(false);
-    setDraft(createEmptyDraft());
-    setMessages([]);
+
+    const savedDraft = lastGenerationDraftRef.current;
+    if (savedDraft) {
+      const result = startSaveProfilePrompt(savedDraft);
+      setDraft(result.draft);
+      setChatStarted(true);
+      appendAssistantMessages(result.messagesToAppend);
+      return;
+    }
+
+    resetChat();
   };
 
   const handleEditorCloseRequest = (result: GenerationEditorCloseResult) => {
@@ -405,7 +495,11 @@ export function AiGenerationChat({ user, chatKey }: AiGenerationChatProps) {
   return (
     <>
       <div className="ai-generation-layout" key={chatKey}>
-      <AiWorkflowPanel draft={draft} />
+      <AiWorkflowPanel
+        draft={draft}
+        activeFieldId={activeField}
+        onStepClick={handleStepClick}
+      />
 
       <section className="ai-generation-chat">
         <div className="ai-generation-messages" role="log" aria-live="polite">
@@ -417,6 +511,21 @@ export function AiGenerationChat({ user, chatKey }: AiGenerationChatProps) {
               <div className="ai-generation-message-bubble">
                 {formatMessage(msg.text)}
                 {msg.kind === "confirmation" && <AiConfirmationSummary draft={draft} />}
+                {msg.kind === "profile-confirmation" && (
+                  <AiConfirmationSummary draft={draft} excludeInput />
+                )}
+                {msg.choices && msg.choices.length > 0 && (
+                  <AiChoiceButtons
+                    choices={msg.choices}
+                    disabled={busy}
+                    multiSelect={isMultiSelectField(activeField)}
+                    selectedValues={getSelectedValuesForField(draft, activeField)}
+                    onSelect={(value) => {
+                      const choice = msg.choices?.find((c) => c.value === value);
+                      submitChoice(value, choice?.label ?? value);
+                    }}
+                  />
+                )}
               </div>
             </div>
           ))}
@@ -439,7 +548,7 @@ export function AiGenerationChat({ user, chatKey }: AiGenerationChatProps) {
             <AttachFileButton
               prominent={attachProminent}
               onClick={() => fileInputRef.current?.click()}
-              title={attachProminent ? "Attach input or reference files" : "Attach files"}
+              title={attachProminent ? "Attach context input files" : "Attach files"}
             />
             <textarea
               className="home-chat-input"

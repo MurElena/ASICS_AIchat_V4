@@ -5,18 +5,21 @@ import { WorkflowInputValue } from "./WorkflowInputValue";
 
 interface AiConfirmationSummaryProps {
   draft: AiGenerationDraft;
+  excludeInput?: boolean;
 }
 
-export function AiConfirmationSummary({ draft }: AiConfirmationSummaryProps) {
+export function AiConfirmationSummary({ draft, excludeInput }: AiConfirmationSummaryProps) {
   const rows: { label: string; value: ReactNode }[] = [
     { label: "Type", value: getFieldDisplayValue(draft, "generationType") },
-    { label: "Input", value: <WorkflowInputValue draft={draft} /> },
     { label: "Template", value: getFieldDisplayValue(draft, "template") },
     { label: "Language", value: getFieldDisplayValue(draft, "language") },
     { label: "Max length", value: getFieldDisplayValue(draft, "maxLength") },
     { label: "Glossaries", value: getFieldDisplayValue(draft, "glossaries") },
     { label: "Style guide", value: getFieldDisplayValue(draft, "styleGuide") },
     { label: "Reference content", value: getFieldDisplayValue(draft, "referenceContent") },
+    ...(excludeInput
+      ? []
+      : [{ label: "Context input", value: <WorkflowInputValue draft={draft} /> }]),
   ];
 
   return (

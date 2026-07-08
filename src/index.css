@@ -584,6 +584,83 @@ textarea {
   border-radius: 1rem;
 }
 
+.ai-workflow-tree-node--active .ai-workflow-tree-node-btn,
+.ai-workflow-tree-node--active .ai-workflow-tree-node-content {
+  background: var(--accent-soft);
+  border-radius: var(--radius-sm);
+}
+
+.ai-workflow-tree-node-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  width: 100%;
+  margin: 0;
+  padding: 0.2rem 0.35rem 0.65rem;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s;
+}
+
+.ai-workflow-tree-node-btn:hover {
+  background: var(--gray-light);
+}
+
+.ai-workflow-tree--pick-step {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 12px;
+}
+
+.ai-workflow-tree-node--pickable .ai-workflow-tree-node-btn {
+  cursor: pointer;
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+.ai-workflow-tree-node--pickable .ai-workflow-tree-node-btn:hover {
+  background: var(--accent-soft);
+}
+
+.ai-choice-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.ai-choice-btn {
+  padding: 0.4rem 0.85rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.ai-choice-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.ai-choice-btn--selected {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ai-choice-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .ai-generation-attach {
   flex-shrink: 0;
   display: inline-flex;
